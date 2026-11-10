@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d14">
+  <title>MSU Draft</title>
+  <link rel="preconnect" href="https://cdn.cloudflare.steamstatic.com">
+  <link rel="preconnect" href="https://api.opendota.com">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="backdrop" aria-hidden="true">
+    <span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span><span class="blob b4"></span>
+  </div>
+
+  <header class="topbar glass">
+    <div class="brand">
+      <div class="logo">M</div>
+      <div>
+        <div class="brand-title">MSU Draft</div>
+        <div class="brand-sub">помощник пика · турнир МГУ</div>
+      </div>
+    </div>
+    <div class="top-actions">
+      <button class="pill" id="dataStatus" title="Источник статистики">
+        <span class="dot"></span><span class="label">Загрузка меты…</span>
+      </button>
+      <button class="pill" id="btnTeam">Команда</button>
+      <button class="pill danger" id="btnReset">Сбросить</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="glass card team" id="allyCard">
+      <div class="card-head">
+        <h2>Мы</h2>
+        <span class="muted small">нажми на слот, чтобы выбрать героя</span>
+      </div>
+      <div class="slots" id="allySlots"></div>
+      <div class="comp" id="comp"></div>
+    </section>
+
+    <section class="glass card team enemy" id="enemyCard">
+      <div class="card-head">
+        <h2>Соперник</h2>
+        <button class="pill small-pill" id="btnAddEnemy">+ пик</button>
+      </div>
+      <div class="slots" id="enemySlots"></div>
+      <div class="card-head sub">
+        <h3>Баны</h3>
+        <button class="pill small-pill" id="btnAddBan">+ бан</button>
+      </div>
+      <div class="bans" id="bans"></div>
+    </section>
+
+    <section class="glass card recs">
+      <div class="card-head">
+        <h2>Рекомендации</h2>
+        <div class="seg" id="posTabs"></div>
+      </div>
+      <div class="filters">
+        <label class="switch"><input type="checkbox" id="onlyPool"><span></span>только пул игрока</label>
+      </div>
+      <div class="rec-list" id="recList"></div>
+    </section>
+
+    <section class="glass card threats">
+      <div class="card-head">
+        <h2>Стоит забанить</h2>
+        <span class="muted small">сильные в мете и против наших героев</span>
+      </div>
+      <div class="ban-list" id="banList"></div>
+    </section>
+  </main>
+
+  <footer class="foot muted small">
+    Статистика: <a href="https://www.opendota.com" target="_blank" rel="noopener">OpenDota</a> (Divine + Immortal, про-сцена).
+    Для перепроверки: <a href="https://www.dotabuff.com/heroes" target="_blank" rel="noopener">Dotabuff</a> ·
+    <a href="https://stratz.com/heroes" target="_blank" rel="noopener">STRATZ</a>.
+    Горячая клавиша: начни печатать имя героя — откроется поиск.
+  </footer>
+
+  <!-- Hero picker sheet -->
+  <div class="sheet-wrap" id="picker" hidden>
+    <div class="sheet glass">
+      <div class="sheet-head">
+        <div>
+          <div class="sheet-title" id="pickerTitle">Выбор героя</div>
+          <div class="muted small" id="pickerSub"></div>
+        </div>
+        <button class="icon-btn" data-close aria-label="Закрыть">✕</button>
+      </div>
+      <div class="search-row">
+        <input id="pickerSearch" class="search" type="search" placeholder="Поиск: «пудж», «sf», «Lina»…" autocomplete="off">
+      </div>
+      <div class="seg attr-seg" id="attrSeg">
+        <button data-attr="" class="on">Все</button>
+        <button data-attr="str">Сила</button>
+        <button data-attr="agi">Ловкость</button>
+        <button data-attr="int">Интеллект</button>
+        <button data-attr="all">Универсал</button>
+      </div>
+      <div class="picker-body" id="pickerBody"></div>
+    </div>
+  </div>
+
+  <!-- Team sheet -->
+  <div class="sheet-wrap" id="teamSheet" hidden>
+    <div class="sheet glass">
+      <div class="sheet-head">
+        <div>
+          <div class="sheet-title">Команда и пулы</div>
+          <div class="muted small">Герои, на которых игрок уверенно играет, получают бонус</div>
+        </div>
+        <button class="icon-btn" data-close aria-label="Закрыть">✕</button>
+      </div>
+      <div class="picker-body" id="teamBody"></div>
+      <div class="weights" id="weights"></div>
+      <div class="sheet-foot">
+        <button class="pill" id="btnTeamDefault">Вернуть по умолчанию</button>
+        <button class="pill" id="btnRefreshData">Обновить статистику</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast glass" id="toast" hidden></div>
+
+  <script src="data/heroes.js"></script>
+  <script src="data/meta.js"></script>
+  <script src="data/team.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
