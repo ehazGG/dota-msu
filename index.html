@@ -39,6 +39,11 @@
       </div>
       <div class="slots" id="allySlots"></div>
       <div class="comp" id="comp"></div>
+      <div class="card-head sub">
+        <h3>Наши баны</h3>
+        <button class="pill small-pill" id="btnOurBan">+ бан</button>
+      </div>
+      <div class="bans" id="ourBans"></div>
     </section>
 
     <section class="glass card team enemy" id="enemyCard">
@@ -48,7 +53,7 @@
       </div>
       <div class="slots" id="enemySlots"></div>
       <div class="card-head sub">
-        <h3>Баны</h3>
+        <h3>Баны соперника</h3>
         <button class="pill small-pill" id="btnAddBan">+ бан</button>
       </div>
       <div class="bans" id="bans"></div>
@@ -65,10 +70,18 @@
       <div class="rec-list" id="recList"></div>
     </section>
 
+    <section class="glass card items-card">
+      <div class="card-head">
+        <h2>Предметы под драфт</h2>
+        <span class="muted small">основа + что собрать против этих соперников</span>
+      </div>
+      <div class="items-list" id="itemsList"></div>
+    </section>
+
     <section class="glass card threats">
       <div class="card-head">
         <h2>Стоит забанить</h2>
-        <span class="muted small">сильные в мете и против наших героев</span>
+        <span class="muted small">нажми — уйдёт в наши баны</span>
       </div>
       <div class="ban-list" id="banList"></div>
     </section>
@@ -129,6 +142,8 @@
   <script src="data/heroes.js"></script>
   <script src="data/meta.js"></script>
   <script src="data/team.js"></script>
+  <script src="data/items.js"></script>
+  <script src="data/builds.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

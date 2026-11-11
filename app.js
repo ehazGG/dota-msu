@@ -14,6 +14,7 @@
     weights: "msu.weights.v1",
     stats: "msu.stats.v1",
     mu: "msu.mu.v1.",
+    items: "msu.items.v1.",
   };
   const DAY = 24 * 3600 * 1000;
   const POS_NAMES = { 1: "Керри", 2: "Мид", 3: "Оффлейн", 4: "Четвёрка", 5: "Пятёрка" };
@@ -50,7 +51,9 @@
   const defaultTeam = () => window.DEFAULT_TEAM.map(t => ({ ...t, pool: t.pool.map(s => bySlug.get(s)?.id).filter(Boolean) }));
   let team = store.get(LS.team, null) || defaultTeam();
   let weights = Object.assign({ comfort: 6, meta: 1, counter: 1, synergy: 1 }, store.get(LS.weights, {}));
-  let draft = Object.assign({ ally: {}, enemy: [], bans: [] }, store.get(LS.draft, {}));
+  const emptyDraft = () => ({ ally: {}, enemy: [], ourBans: [], enemyBans: [] });
+  let draft = Object.assign(emptyDraft(), store.get(LS.draft, {}));
+  if (Array.isArray(draft.bans)) { draft.enemyBans.push(...draft.bans); delete draft.bans; } // old format
   let activePos = null;
   let onlyPool = false;
 
@@ -60,7 +63,7 @@
 
   const saveDraft = () => store.set(LS.draft, draft);
   const saveTeam = () => store.set(LS.team, team);
-  const takenIds = () => new Set([...Object.values(draft.ally), ...draft.enemy, ...draft.bans]);
+  const takenIds = () => new Set([...Object.values(draft.ally), ...draft.enemy, ...draft.ourBans, ...draft.enemyBans]);
   const playerFor = pos => team.find(t => t.pos === pos);
 
   // ---------- DOM helpers ----------
@@ -168,9 +171,106 @@
   }
   async function ensureMatchups() {
     const need = [...draft.enemy, ...Object.values(draft.ally)].filter(id => !matchups.has(id));
-    if (!need.length) return;
-    await Promise.all(need.map(loadMatchups));
+    const needItems = Object.values(draft.ally).filter(id => !itemPop.has(id));
+    if (!need.length && !needItems.length) return;
+    await Promise.all([...need.map(loadMatchups), ...needItems.map(loadItemPop)]);
     render();
+  }
+
+  // ---------- items ----------
+  const ITEMS = window.ITEMS;
+  const itemById = new Map(Object.entries(ITEMS).map(([k, v]) => [v[0], k]));
+  const BOOTS = new Set("power_treads phase_boots arcane_boots tranquil_boots travel_boots boots_of_bearing guardian_greaves".split(" "));
+  const NOT_CORE = new Set(("platemail ultimate_orb mystic_staff reaver eagle relic hyperstone demon_edge point_booster talisman_of_evasion " +
+    "claymore mithril_hammer cornucopia tiara_of_selemene soul_booster ring_of_tarrasque pers aghanims_shard_roshan ultimate_scepter_roshan " +
+    "cheese refresher_shard pocket_roshan oblivion_staff vitality_booster ogre_axe staff_of_wizardry blade_of_alacrity essence_distiller " +
+    "necronomicon_2 necronomicon_3 dagon_2 dagon_3 dagon_4 dagon_5 diffusal_blade_2 travel_boots_2 lesser_crit sange yasha").split(" "));
+  const MELEE_ONLY = new Set(["bfury", "abyssal_blade"]);
+  const itemPop = new Map(); // heroId -> [itemKey...] (live core)
+  const groups = Object.fromEntries(Object.entries(window.ENEMY_GROUPS).map(([g, list]) => [g, new Set(list.split(" ").map(s => bySlug.get(s)?.id).filter(Boolean))]));
+
+  function itemIcon(key, cls = "item", title) {
+    const it = ITEMS[key];
+    if (!it) return null;
+    const box = el("span", { class: cls, title: title || it[1] });
+    const img = new Image();
+    img.alt = it[1]; img.loading = "lazy"; img.decoding = "async";
+    let i = 0;
+    img.src = CDNS[0] + it[3];
+    img.onerror = () => { i++; if (i < CDNS.length) img.src = CDNS[i] + it[3]; else img.replaceWith(el("b", {}, it[1].split(/\s/).map(w => w[0]).join("").slice(0, 3))); };
+    box.append(img);
+    return box;
+  }
+
+  async function loadItemPop(heroId) {
+    if (itemPop.has(heroId)) return;
+    const key = LS.items + heroId;
+    const cached = store.get(key, null);
+    const parse = d => {
+      const counts = {};
+      for (const phase of ["early_game_items", "mid_game_items"]) for (const [id, n] of Object.entries(d[phase] || {})) {
+        const k = itemById.get(Number(id));
+        if (!k || NOT_CORE.has(k)) continue;
+        if (!BOOTS.has(k) && (ITEMS[k][2] || 0) < 1400) continue;
+        counts[k] = (counts[k] || 0) + n;
+      }
+      const ranked = Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k]) => k);
+      const boot = ranked.find(k => BOOTS.has(k));
+      const rest = ranked.filter(k => !BOOTS.has(k)).slice(0, boot ? 3 : 4);
+      return boot ? [boot, ...rest] : rest;
+    };
+    if (cached && Date.now() - cached.t < DAY) { itemPop.set(heroId, cached.d); return; }
+    try {
+      const d = await fetchJSON(`${API}/heroes/${heroId}/itemPopularity`);
+      const core = parse(d);
+      if (core.length >= 3) { store.set(key, { t: Date.now(), d: core }); itemPop.set(heroId, core); }
+    } catch (e) { if (cached) itemPop.set(heroId, cached.d); }
+  }
+
+  function buildFor(h, pos) {
+    const live = itemPop.get(h.id);
+    const core = live || (window.CORE_BUILDS[h.slug] || window.CORE_BY_POS[pos]).split(" ");
+    const enemies = draft.enemy.map(id => byId.get(id));
+    const sit = new Map(); // item -> {w, reasons[]}
+    for (const r of window.ITEM_RULES) {
+      const key = r.items[pos];
+      if (!key || !ITEMS[key]) continue;
+      if (MELEE_ONLY.has(key) && h.atk !== "Melee") continue;
+      const hits = r.group === "magic"
+        ? enemies.filter(e => e.tags.includes("M"))
+        : enemies.filter(e => groups[r.group].has(e.id));
+      if (hits.length < r.min) continue;
+      if (core.includes(key)) continue;
+      const cur = sit.get(key) || { w: 0, reasons: [] };
+      cur.w += hits.length;
+      cur.reasons.push(`${r.why}: ${hits.map(e => e.name).join(", ")}`);
+      sit.set(key, cur);
+    }
+    const situational = [...sit.entries()].sort((a, b) => b[1].w - a[1].w).slice(0, 4).map(([key, v]) => ({ key, reasons: v.reasons }));
+    return { core, situational, live: !!live };
+  }
+
+  function renderItems() {
+    const box = $("#itemsList");
+    box.replaceChildren();
+    const picked = [...team].sort((a, b) => a.pos - b.pos).filter(t => draft.ally[t.pos]);
+    if (!picked.length) { box.append(el("div", { class: "empty-note" }, "Выбери героев для нашей команды — здесь появятся предметы под драфт соперника.")); return; }
+    for (const t of picked) {
+      const h = byId.get(draft.ally[t.pos]);
+      const b = buildFor(h, t.pos);
+      box.append(el("div", { class: "build" },
+        el("div", { class: "build-head" }, thumb(h), el("div", {},
+          el("div", { class: "t1" }, el("span", { class: "posbadge" }, "P" + t.pos), h.name),
+          el("div", { class: "t2 muted small" }, t.player + (b.live ? " · сборка по OpenDota" : " · базовая сборка")))),
+        el("div", { class: "build-row" }, el("span", { class: "row-label" }, "Основа"),
+          el("div", { class: "items" }, b.core.map(k => itemIcon(k)))),
+        el("div", { class: "build-row" }, el("span", { class: "row-label" }, "Против них"),
+          b.situational.length
+            ? el("div", { class: "sit-list" }, b.situational.map(s => el("div", { class: "sit" }, itemIcon(s.key, "item sit-item"),
+                el("div", {}, el("div", { class: "sit-name" }, ITEMS[s.key][1]), el("div", { class: "muted small" }, s.reasons.join("; "))))))
+            : el("div", { class: "muted small" }, draft.enemy.length ? "ничего особенного не нужно" : "добавь пики соперника"))
+      ));
+    }
   }
 
   // ---------- scoring ----------
@@ -304,6 +404,7 @@
     renderRecs();
     renderBans();
     renderComp();
+    renderItems();
   }
 
   function renderAlly() {
@@ -323,7 +424,10 @@
         thumb(h),
         el("div", { class: "meta" },
           el("div", { class: "t1" }, el("span", { class: "posbadge" }, "P" + t.pos), h ? h.name : t.player),
-          el("div", { class: "t2" }, h ? [t.player, inPool ? el("span", { class: "pooltag" }, " · из пула") : ""] : `${t.role} · не выбран`)
+          el("div", { class: "t2" }, h ? [t.player, inPool ? el("span", { class: "pooltag" }, " · из пула") : ""] : `${t.role} · не выбран`),
+          h ? (() => { const b = buildFor(h, t.pos); return el("div", { class: "slot-items" },
+            b.core.map(k => itemIcon(k, "item mini")),
+            b.situational.map(s => itemIcon(s.key, "item mini sit-item", ITEMS[s.key][1] + " — " + s.reasons.join("; ")))); })() : null
         ),
         h ? el("span", { class: "x", title: "Убрать", onclick: e => { e.stopPropagation(); delete draft.ally[t.pos]; saveDraft(); render(); } }, "✕") : null
       );
@@ -348,12 +452,16 @@
         h ? el("span", { class: "x", title: "Убрать", onclick: e => { e.stopPropagation(); draft.enemy.splice(i, 1); saveDraft(); render(); } }, "✕") : null
       ));
     }
-    const bans = $("#bans");
-    bans.replaceChildren();
-    if (!draft.bans.length) bans.append(el("div", { class: "empty-note" }, "Банов пока нет"));
-    draft.bans.forEach((id, i) => {
+    renderBanRow($("#bans"), draft.enemyBans);
+    renderBanRow($("#ourBans"), draft.ourBans);
+  }
+
+  function renderBanRow(box, arr) {
+    box.replaceChildren();
+    if (!arr.length) box.append(el("div", { class: "empty-note" }, "Банов пока нет"));
+    arr.forEach((id, i) => {
       const h = byId.get(id);
-      bans.append(el("button", { class: "ban", title: h.name + " — нажми, чтобы убрать", onclick: () => { draft.bans.splice(i, 1); saveDraft(); render(); } }, heroImg(h)));
+      box.append(el("button", { class: "ban", title: h.name + " — нажми, чтобы убрать", onclick: () => { arr.splice(i, 1); saveDraft(); render(); } }, heroImg(h)));
     });
   }
 
@@ -414,8 +522,8 @@
     for (const b of banSuggestions()) {
       const s = stats?.get(b.h.id);
       box.append(el("button", {
-        class: "ban-sugg", title: "Нажми, чтобы добавить в баны",
-        onclick: () => addBan(b.h.id),
+        class: "ban-sugg", title: "Нажми, чтобы забанить",
+        onclick: () => addBan(b.h.id, "ourBans"),
       },
         thumb(b.h),
         el("div", {},
@@ -454,10 +562,10 @@
     if (draft.enemy.length >= 5) { toast("У соперника уже 5 героев"); return; }
     draft.enemy.push(id); saveDraft(); render(); ensureMatchups();
   }
-  function addBan(id) {
+  function addBan(id, side = "ourBans") {
     if (takenIds().has(id)) return;
-    draft.bans.push(id); saveDraft(); render();
-    toast(byId.get(id).name + " в бане");
+    draft[side].push(id); saveDraft(); render();
+    toast(byId.get(id).name + (side === "ourBans" ? " — наш бан" : " — бан соперника"));
   }
 
   // ---------- picker ----------
@@ -475,18 +583,19 @@
     renderPicker();
     s.focus();
   }
-  function closePicker() { $("#picker").hidden = true; pickerCtx = null; }
+  function closePicker() { $("#picker").hidden = true; pickerCtx = null; $("#pickerSearch").blur(); }
 
   function pickerMatches() {
     const q = $("#pickerSearch").value.trim().toLowerCase();
-    return sortedHeroes.filter(h => (!pickerAttr || h.attr === pickerAttr) && (!q || h.search.includes(q) || h.search.split(" ").some(w => w.startsWith(q))));
+    const taken = pickerCtx?.multi ? new Set() : takenIds();
+    return sortedHeroes.filter(h => !taken.has(h.id) && (!pickerAttr || h.attr === pickerAttr) && (!q || h.search.includes(q) || h.search.split(" ").some(w => w.startsWith(q))));
   }
 
   function renderPicker() {
     const body = $("#pickerBody");
     body.replaceChildren();
     const ctx = pickerCtx;
-    const taken = ctx.multi ? new Set() : takenIds();
+    const taken = ctx.multi ? new Set() : takenIds(); // picked / banned heroes are hidden
     const list = pickerMatches();
     kbIndex = Math.min(kbIndex, Math.max(0, list.length - 1));
     const cell = (h, i) => {
@@ -501,9 +610,11 @@
 
     if (ctx.pos && !$("#pickerSearch").value) {
       const p = playerFor(ctx.pos);
-      const pool = p.pool.map(id => byId.get(id)).filter(h => !pickerAttr || h.attr === pickerAttr);
+      const pool = p.pool.map(id => byId.get(id)).filter(h => !taken.has(h.id) && (!pickerAttr || h.attr === pickerAttr));
       if (pool.length) {
         body.append(el("div", { class: "group-title" }, `Пул: ${p.player}`), el("div", { class: "grid" }, pool.map(h => cell(h, -1))));
+      }
+      {
         const recs = recommendations(ctx.pos).filter(r => !r.inPool).slice(0, 8).map(r => r.h);
         if (recs.length) body.append(el("div", { class: "group-title" }, "Советуем по мете и драфту"), el("div", { class: "grid" }, recs.map(h => cell(h, -1))));
       }
@@ -563,13 +674,14 @@
   // ---------- events ----------
   function bind() {
     $("#btnAddEnemy").onclick = () => openPicker({ title: "Пик соперника", sub: "Кого взял соперник?", onPick: addEnemy });
-    $("#btnAddBan").onclick = () => openPicker({ title: "Бан", sub: "Какой герой забанен?", onPick: addBan });
-    $("#btnReset").onclick = () => { if (confirm("Очистить драфт?")) { draft = { ally: {}, enemy: [], bans: [] }; activePos = 1; saveDraft(); render(); } };
+    $("#btnAddBan").onclick = () => openPicker({ title: "Бан соперника", sub: "Кого забанил соперник?", onPick: id => addBan(id, "enemyBans") });
+    $("#btnOurBan").onclick = () => openPicker({ title: "Наш бан", sub: "Кого баним мы?", onPick: id => addBan(id, "ourBans") });
+    $("#btnReset").onclick = () => { if (confirm("Очистить драфт?")) { draft = emptyDraft(); activePos = 1; saveDraft(); render(); } };
     $("#btnTeam").onclick = () => { renderTeamSheet(); $("#teamSheet").hidden = false; };
     $("#btnTeamDefault").onclick = () => { if (confirm("Вернуть составы и пулы по умолчанию?")) { team = defaultTeam(); saveTeam(); renderTeamSheet(); render(); } };
     $("#btnRefreshData").onclick = async () => {
-      Object.keys(localStorage).filter(k => k.startsWith(LS.mu)).forEach(store.del);
-      matchups.clear(); setStatus("loading");
+      Object.keys(localStorage).filter(k => k.startsWith(LS.mu) || k.startsWith(LS.items)).forEach(store.del);
+      matchups.clear(); itemPop.clear(); setStatus("loading");
       await loadStats(true); await ensureMatchups(); toast("Статистика обновлена");
     };
     $("#dataStatus").onclick = () => toast(dataMode === "live"
@@ -580,7 +692,7 @@
     document.querySelectorAll(".sheet-wrap").forEach(w => {
       w.addEventListener("click", e => {
         if (e.target === w || e.target.closest("[data-close]")) {
-          w.hidden = true; if (w.id === "picker") pickerCtx = null;
+          w.hidden = true; if (w.id === "picker") closePicker();
         }
       });
     });
@@ -598,7 +710,7 @@
       else if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); kbIndex = Math.max(0, kbIndex - 1); renderPicker(); }
     });
     document.addEventListener("keydown", e => {
-      if (e.key === "Escape") { document.querySelectorAll(".sheet-wrap").forEach(w => (w.hidden = true)); pickerCtx = null; return; }
+      if (e.key === "Escape") { document.querySelectorAll(".sheet-wrap").forEach(w => (w.hidden = true)); closePicker(); return; }
       const typing = /INPUT|TEXTAREA/.test(document.activeElement?.tagName);
       const anyOpen = [...document.querySelectorAll(".sheet-wrap")].some(w => !w.hidden);
       if (!typing && !anyOpen && e.key.length === 1 && /\S/.test(e.key) && !e.metaKey && !e.ctrlKey && !e.altKey) {

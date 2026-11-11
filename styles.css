@@ -102,18 +102,19 @@ button { font: inherit; color: inherit; cursor: pointer; }
   width: min(1320px, calc(100% - 24px)); margin: 18px auto;
   display: grid; gap: 16px;
   grid-template-columns: 1fr 1fr;
-  grid-template-areas: "ally enemy" "recs recs" "threats threats";
+  grid-template-areas: "ally enemy" "recs recs" "items items" "threats threats";
 }
 #allyCard { grid-area: ally; }
 #enemyCard { grid-area: enemy; }
 .recs { grid-area: recs; }
 .threats { grid-area: threats; }
+.items-card { grid-area: items; }
 @media (min-width: 1180px) {
   .layout { grid-template-columns: 1fr 1.25fr 1fr;
-    grid-template-areas: "ally recs enemy" "ally recs enemy" "threats threats threats"; align-items: start; }
+    grid-template-areas: "ally recs enemy" "ally recs enemy" "items items items" "threats threats threats"; align-items: start; }
 }
 @media (max-width: 760px) {
-  .layout { grid-template-columns: 1fr; grid-template-areas: "ally" "enemy" "recs" "threats"; }
+  .layout { grid-template-columns: 1fr; grid-template-areas: "ally" "enemy" "recs" "items" "threats"; }
   .topbar { border-radius: 26px; }
 }
 
@@ -253,3 +254,22 @@ h3 { font-size: 15px; margin: 0; }
   .rec .thumb { width: 64px; height: 36px; }
   .card { padding: 12px; border-radius: 24px; }
 }
+
+/* ===== Items ===== */
+.item { display: inline-grid; place-items: center; width: 44px; height: 32px; border-radius: 8px; overflow: hidden; flex: none;
+  background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); font-size: 10px; color: var(--muted); }
+.item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.item.mini { width: 30px; height: 22px; border-radius: 6px; }
+.item.sit-item { border-color: rgba(255,211,110,.7); box-shadow: 0 0 0 1px rgba(255,211,110,.25); }
+.slot-items { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 5px; }
+.items { display: flex; flex-wrap: wrap; gap: 6px; }
+.items-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 10px; }
+.build { padding: 12px; border-radius: 20px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); display: grid; gap: 10px; align-content: start; }
+.build-head { display: flex; gap: 10px; align-items: center; }
+.build-head .thumb { width: 64px; height: 36px; border-radius: 10px; overflow: hidden; flex: none; }
+.build-head .t1 { font-weight: 650; }
+.build-row { display: grid; gap: 6px; }
+.row-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.sit-list { display: grid; gap: 6px; }
+.sit { display: flex; gap: 8px; align-items: center; }
+.sit-name { font-size: 13px; font-weight: 600; color: #ffe7ad; }
