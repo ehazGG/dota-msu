@@ -1,6 +1,6 @@
 /* ===== Liquid Glass theme ===== */
 :root {
-  --bg: #07080d;
+  --bg: #0e0f12;
   --text: #f4f6fb;
   --muted: rgba(235, 240, 255, .58);
   --glass: rgba(255, 255, 255, .075);
@@ -37,14 +37,14 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .small { font-size: 12.5px; }
 [hidden] { display: none !important; }
 
-/* ===== Animated colourful backdrop (what the glass refracts) ===== */
+/* ===== Neutral graphite backdrop (soft light shapes for the glass to refract) ===== */
 .backdrop { position: fixed; inset: 0; z-index: -1; overflow: hidden;
-  background: radial-gradient(1200px 800px at 50% -10%, #1b2140 0%, #07080d 60%); }
-.blob { position: absolute; border-radius: 50%; filter: blur(70px); opacity: .55; animation: float 26s ease-in-out infinite alternate; }
-.b1 { width: 520px; height: 520px; background: #c0392b; left: -120px; top: 10%; }
-.b2 { width: 460px; height: 460px; background: #1abc9c; right: -100px; top: 30%; animation-duration: 31s; }
-.b3 { width: 380px; height: 380px; background: #6c5ce7; left: 35%; bottom: -140px; animation-duration: 23s; }
-.b4 { width: 300px; height: 300px; background: #f39c12; right: 25%; top: -120px; opacity: .3; animation-duration: 35s; }
+  background: radial-gradient(1200px 800px at 50% -10%, #23252b 0%, #0e0f12 65%); }
+.blob { position: absolute; border-radius: 50%; filter: blur(90px); opacity: .22; animation: float 26s ease-in-out infinite alternate; }
+.b1 { width: 520px; height: 520px; background: #8a8f9c; left: -120px; top: 10%; }
+.b2 { width: 460px; height: 460px; background: #6f7480; right: -100px; top: 30%; animation-duration: 31s; }
+.b3 { width: 380px; height: 380px; background: #9aa0ab; left: 35%; bottom: -140px; animation-duration: 23s; }
+.b4 { width: 300px; height: 300px; background: #c9ccd2; right: 25%; top: -120px; opacity: .12; animation-duration: 35s; }
 @keyframes float {
   0% { transform: translate(0, 0) scale(1); }
   50% { transform: translate(60px, -40px) scale(1.12); }
