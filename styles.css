@@ -102,7 +102,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   width: min(1320px, calc(100% - 24px)); margin: 18px auto;
   display: grid; gap: 16px;
   grid-template-columns: 1fr 1fr;
-  grid-template-areas: "ally enemy" "recs recs" "items items" "threats threats";
+  grid-template-areas: "cm cm" "ally enemy" "recs recs" "items items" "threats threats";
 }
 #allyCard { grid-area: ally; }
 #enemyCard { grid-area: enemy; }
@@ -111,10 +111,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .items-card { grid-area: items; }
 @media (min-width: 1180px) {
   .layout { grid-template-columns: 1fr 1.25fr 1fr;
-    grid-template-areas: "ally recs enemy" "ally recs enemy" "items items items" "threats threats threats"; align-items: start; }
+    grid-template-areas: "cm cm cm" "ally recs enemy" "ally recs enemy" "items items items" "threats threats threats"; align-items: start; }
 }
 @media (max-width: 760px) {
-  .layout { grid-template-columns: 1fr; grid-template-areas: "ally" "enemy" "recs" "items" "threats"; }
+  .layout { grid-template-columns: 1fr; grid-template-areas: "cm" "ally" "enemy" "recs" "items" "threats"; }
   .topbar { border-radius: 26px; }
 }
 
@@ -273,3 +273,40 @@ h3 { font-size: 15px; margin: 0; }
 .sit-list { display: grid; gap: 6px; }
 .sit { display: flex; gap: 8px; align-items: center; }
 .sit-name { font-size: 13px; font-weight: 600; color: #ffe7ad; }
+
+/* ===== Captains Mode bar ===== */
+.cm { grid-area: cm; display: grid; gap: 14px; }
+.cm-top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; }
+.cm-now { padding: 10px 16px; border-radius: 18px; border: 1px solid var(--stroke); background: rgba(255,255,255,.05); min-width: 220px; }
+.cm-now.us { border-color: rgba(94,224,168,.55); background: rgba(94,224,168,.1); }
+.cm-now.them { border-color: rgba(255,107,107,.55); background: rgba(255,107,107,.1); }
+.cm-step { font-size: 12px; color: var(--muted); }
+.cm-what { font-size: 22px; font-weight: 750; letter-spacing: -.02em; }
+.cm-now.ban .cm-what::after { content: " ⛔"; font-size: 16px; }
+.cm-actions { display: flex; gap: 8px; }
+.pill.primary { background: linear-gradient(140deg, rgba(122,167,255,.45), rgba(122,167,255,.2)); border-color: rgba(122,167,255,.6); }
+.pill:disabled { opacity: .4; cursor: default; }
+.cm-timer { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cm-turn { font-size: 26px; font-weight: 750; font-variant-numeric: tabular-nums; min-width: 70px; }
+.cm-turn.low { color: var(--enemy); }
+.cm-top .seg { margin-left: auto; }
+.cm-timeline { display: flex; gap: 14px; flex-wrap: wrap; }
+.cm-phase { display: grid; gap: 6px; }
+.cm-phase-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.cm-row { display: flex; gap: 4px; flex-wrap: wrap; }
+.cm-chip { width: 46px; height: 28px; border-radius: 8px; overflow: hidden; position: relative; display: grid; place-items: center;
+  font-size: 11px; font-weight: 700; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.04); color: var(--muted); }
+.cm-chip.us { border-bottom: 3px solid var(--ally); }
+.cm-chip.them { border-bottom: 3px solid var(--enemy); }
+.cm-chip.ban.filled img { filter: grayscale(1) brightness(.7); }
+.cm-chip.ban.filled::after { content: ""; position: absolute; left: -10%; right: -10%; top: 50%; height: 2px; background: var(--enemy); transform: rotate(-18deg); }
+.cm-chip.current { outline: 2px solid var(--gold); outline-offset: 1px; box-shadow: 0 0 14px rgba(255,211,110,.5); animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 4px rgba(255,211,110,.2); } }
+.cm-chip .hero-img { width: 100%; height: 100%; object-fit: cover; }
+.tag.pos { background: rgba(255,255,255,.12); color: var(--text); }
+.rec.static { cursor: default; }
+.small-sheet { width: min(460px, 100%); }
+.pos-body { display: grid; gap: 8px; }
+.pos-choice { justify-content: flex-start; }
+.pos-choice.on { border-color: var(--accent); }
+@media (max-width: 760px) { .cm-top .seg { margin-left: 0; } .cm-chip { width: 38px; height: 24px; } }

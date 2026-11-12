@@ -27,21 +27,40 @@
         <span class="dot"></span><span class="label">Загрузка меты…</span>
       </button>
       <button class="pill" id="btnTeam">Команда</button>
-      <button class="pill danger" id="btnReset">Сбросить</button>
+      <button class="pill danger" id="btnReset">Новый драфт</button>
     </div>
   </header>
 
   <main class="layout">
+    <section class="glass card cm" id="cmCard">
+      <div class="cm-top">
+        <div class="cm-now" id="cmNow"></div>
+        <div class="cm-actions">
+          <button class="pill primary" id="btnStep">Выбрать героя</button>
+          <button class="pill" id="btnUndo" title="Ctrl+Z">↶ Отменить</button>
+        </div>
+        <div class="cm-timer">
+          <div class="cm-turn" id="cmTurn">0:30</div>
+          <div class="muted small">резерв: мы <b id="cmResUs">2:10</b> · они <b id="cmResThem">2:10</b></div>
+          <button class="pill small-pill" id="btnTimer">▶ Таймер</button>
+        </div>
+        <div class="seg" id="cmFirst" title="Кто пикает первым">
+          <button data-first="1">Мы — 1-й пик</button>
+          <button data-first="0">Мы — 2-й пик</button>
+        </div>
+      </div>
+      <div class="cm-timeline" id="cmTimeline"></div>
+    </section>
+
     <section class="glass card team" id="allyCard">
       <div class="card-head">
         <h2>Мы</h2>
-        <span class="muted small">нажми на слот, чтобы выбрать героя</span>
+        <span class="muted small">⇅ на герое — сменить позицию</span>
       </div>
       <div class="slots" id="allySlots"></div>
       <div class="comp" id="comp"></div>
       <div class="card-head sub">
         <h3>Наши баны</h3>
-        <button class="pill small-pill" id="btnOurBan">+ бан</button>
       </div>
       <div class="bans" id="ourBans"></div>
     </section>
@@ -49,19 +68,18 @@
     <section class="glass card team enemy" id="enemyCard">
       <div class="card-head">
         <h2>Соперник</h2>
-        <button class="pill small-pill" id="btnAddEnemy">+ пик</button>
+
       </div>
       <div class="slots" id="enemySlots"></div>
       <div class="card-head sub">
         <h3>Баны соперника</h3>
-        <button class="pill small-pill" id="btnAddBan">+ бан</button>
       </div>
       <div class="bans" id="bans"></div>
     </section>
 
     <section class="glass card recs">
       <div class="card-head">
-        <h2>Рекомендации</h2>
+        <h2 id="recTitle">Рекомендации</h2>
         <div class="seg" id="posTabs"></div>
       </div>
       <div class="filters">
@@ -81,7 +99,7 @@
     <section class="glass card threats">
       <div class="card-head">
         <h2>Стоит забанить</h2>
-        <span class="muted small">нажми — уйдёт в наши баны</span>
+        <span class="muted small">нажми во время нашего бана</span>
       </div>
       <div class="ban-list" id="banList"></div>
     </section>
@@ -91,7 +109,7 @@
     Статистика: <a href="https://www.opendota.com" target="_blank" rel="noopener">OpenDota</a> (Divine + Immortal, про-сцена).
     Для перепроверки: <a href="https://www.dotabuff.com/heroes" target="_blank" rel="noopener">Dotabuff</a> ·
     <a href="https://stratz.com/heroes" target="_blank" rel="noopener">STRATZ</a>.
-    Горячая клавиша: начни печатать имя героя — откроется поиск.
+    Горячие клавиши: начни печатать имя героя — откроется поиск для текущего хода; Ctrl+Z — отменить ход.
   </footer>
 
   <!-- Hero picker sheet -->
@@ -134,6 +152,16 @@
         <button class="pill" id="btnTeamDefault">Вернуть по умолчанию</button>
         <button class="pill" id="btnRefreshData">Обновить статистику</button>
       </div>
+    </div>
+  </div>
+
+  <div class="sheet-wrap" id="posSheet" hidden>
+    <div class="sheet glass small-sheet">
+      <div class="sheet-head">
+        <div class="sheet-title" id="posTitle">Позиция</div>
+        <button class="icon-btn" data-close aria-label="Закрыть">✕</button>
+      </div>
+      <div class="pos-body" id="posBody"></div>
     </div>
   </div>
 
