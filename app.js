@@ -10,8 +10,8 @@
   const API = "https://api.opendota.com/api";
   const LS = {
     draft: "msu.draft.v1",
-    team: "msu.team.v4",
-    teamOld: ["msu.team.v3", "msu.team.v2", "msu.team.v1"],
+    team: "msu.team.v5",
+    teamOld: ["msu.team.v4", "msu.team.v3", "msu.team.v2", "msu.team.v1"],
     weights: "msu.weights.v1",
     stats: "msu.stats.v1",
     mu: "msu.mu.v1.",
@@ -53,9 +53,11 @@
   let team = store.get(LS.team, null);
   if (!team) {
     // older versions: roster changed on positions 3–5; keep saved edits for the other positions
-    const old = LS.teamOld.map(k => store.get(k, null)).find(Boolean);
+    const idx = LS.teamOld.findIndex(k => store.get(k, null));
+    const old = idx >= 0 ? store.get(LS.teamOld[idx], null) : null;
     team = defaultTeam();
-    if (old) team = old.map(t => [3, 4, 5].includes(t.pos) ? team.find(x => x.pos === t.pos) : t);
+    const changed = idx === 0 ? [5] : [3, 4, 5]; // v4 only differs in Роберт's pool
+    if (old) team = old.map(t => changed.includes(t.pos) ? team.find(x => x.pos === t.pos) : t);
     store.set(LS.team, team);
   }
   let weights = Object.assign({ comfort: 6, meta: 1, counter: 1, synergy: 1 }, store.get(LS.weights, {}));

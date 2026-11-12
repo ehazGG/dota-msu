@@ -5,5 +5,5 @@ window.DEFAULT_TEAM = [
   { pos: 2, role: "Мидер",     player: "Лёня",   pool: ["lina", "nevermore", "obsidian_destroyer", "dragon_knight", "zuus", "pudge", "templar_assassin"] },
   { pos: 3, role: "Оффлейн",   player: "Булат",  pool: ["axe", "legion_commander", "tidehunter", "centaur", "night_stalker", "dawnbreaker", "slardar", "skeleton_king", "pudge"] },
   { pos: 4, role: "Семи-саппорт", player: "Лёва", pool: ["invoker", "earthshaker", "snapfire", "magnataur", "hoodwink", "treant", "muerta", "rubick", "winter_wyvern", "monkey_king", "nyx_assassin", "disruptor", "ringmaster", "pugna", "tusk"] },
-  { pos: 5, role: "Фулл-саппорт", player: "Роберт", pool: ["hoodwink", "pudge", "snapfire", "tinker", "skywrath_mage", "witch_doctor", "ringmaster", "lion", "invoker", "winter_wyvern", "mirana"] }
+  { pos: 5, role: "Фулл-саппорт", player: "Роберт", pool: ["hoodwink", "pudge", "techies", "snapfire", "skywrath_mage", "shadow_shaman", "undying", "ringmaster", "lion", "winter_wyvern", "mirana", "witch_doctor"] }
 ];
