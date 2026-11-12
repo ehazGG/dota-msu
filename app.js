@@ -10,8 +10,8 @@
   const API = "https://api.opendota.com/api";
   const LS = {
     draft: "msu.draft.v1",
-    team: "msu.team.v3",
-    teamOld: ["msu.team.v2", "msu.team.v1"],
+    team: "msu.team.v4",
+    teamOld: ["msu.team.v3", "msu.team.v2", "msu.team.v1"],
     weights: "msu.weights.v1",
     stats: "msu.stats.v1",
     mu: "msu.mu.v1.",
@@ -52,10 +52,10 @@
   const defaultTeam = () => window.DEFAULT_TEAM.map(t => ({ ...t, pool: t.pool.map(s => bySlug.get(s)?.id).filter(Boolean) }));
   let team = store.get(LS.team, null);
   if (!team) {
-    // older versions: 4th position changed (Лёва and his pool); keep the rest of saved edits
+    // older versions: roster changed on positions 3–5; keep saved edits for the other positions
     const old = LS.teamOld.map(k => store.get(k, null)).find(Boolean);
     team = defaultTeam();
-    if (old) team = old.map(t => t.pos === 4 ? team.find(x => x.pos === 4) : t);
+    if (old) team = old.map(t => [3, 4, 5].includes(t.pos) ? team.find(x => x.pos === t.pos) : t);
     store.set(LS.team, team);
   }
   let weights = Object.assign({ comfort: 6, meta: 1, counter: 1, synergy: 1 }, store.get(LS.weights, {}));
