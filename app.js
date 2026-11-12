@@ -59,10 +59,36 @@
     store.set(LS.team, team);
   }
   let weights = Object.assign({ comfort: 6, meta: 1, counter: 1, synergy: 1 }, store.get(LS.weights, {}));
-  const emptyDraft = () => ({ ally: {}, enemy: [], ourBans: [], enemyBans: [] });
+  // Captains Mode order. "A" = team with first pick, "B" = second pick.
+  const CM = [
+    ["A", "ban"], ["A", "ban"], ["B", "ban"], ["B", "ban"], ["A", "ban"], ["B", "ban"], ["B", "ban"],
+    ["A", "pick"], ["B", "pick"],
+    ["A", "ban"], ["A", "ban"], ["B", "ban"],
+    ["B", "pick"], ["A", "pick"], ["A", "pick"], ["B", "pick"], ["B", "pick"], ["A", "pick"],
+    ["A", "ban"], ["B", "ban"], ["A", "ban"], ["B", "ban"],
+    ["A", "pick"], ["B", "pick"],
+  ];
+  const PHASE_START = [0, 9, 18];
+  const emptyDraft = (firstPick = true) => ({ firstPick, actions: [], ally: {}, enemy: [], ourBans: [], enemyBans: [] });
   let draft = Object.assign(emptyDraft(), store.get(LS.draft, {}));
-  if (Array.isArray(draft.bans)) { draft.enemyBans.push(...draft.bans); delete draft.bans; } // old format
-  let activePos = null;
+  if (!Array.isArray(draft.actions)) draft = emptyDraft(); // drafts from the old free mode are dropped
+  const sideOf = i => ((CM[i][0] === "A") === draft.firstPick ? "us" : "them");
+  function stepInfo(i = draft.actions.length) {
+    if (i >= CM.length) return null;
+    const phase = i < 9 ? 1 : i < 18 ? 2 : 3;
+    return { i, type: CM[i][1], side: sideOf(i), phase };
+  }
+  function rebuild() {
+    Object.assign(draft, { ally: {}, enemy: [], ourBans: [], enemyBans: [] });
+    draft.actions.forEach((a, i) => {
+      const s = stepInfo(i);
+      if (s.type === "ban") (s.side === "us" ? draft.ourBans : draft.enemyBans).push(a.hero);
+      else if (s.side === "us") draft.ally[a.pos] = a.hero;
+      else draft.enemy.push(a.hero);
+    });
+  }
+  rebuild();
+  let view = "now"; // "now" or a position number
   let onlyPool = false;
 
   let stats = null;            // Map heroId -> {wr, presence, games}
@@ -374,11 +400,23 @@
       if (farm && h.tags.includes("X")) syn -= 1.5;
     }
 
-    const total = comfort + m.v * weights.meta + counter * weights.counter + syn * weights.synergy + (posPen || 0);
+    // Captains Mode context
+    const ourPicks = allyIds.length;
+    let cm = 0;
+    if (ourPicks <= 1) {
+      const openPos = [1, 2, 3, 4, 5].filter(q => !draft.ally[q]);
+      const flexFor = openPos.filter(q => h.pos.includes(q) && (playerFor(q)?.pool.includes(h.id) || h.pos[0] === q));
+      if (flexFor.length >= 2) { cm += 1.5; reasons.push("гибкий — скроет, кто на какой позиции"); flags.push(["meta", "флекс"]); }
+      const open = takenIds();
+      const threats = [...h.counteredBy].filter(id => !open.has(id)).length;
+      if (threats >= 3) { cm -= 1; reasons.push("легко законтрить — лучше брать позже"); }
+    }
+    if (ourPicks === 4 && draft.enemy.length === 5) { cm += counter * 0.5; if (counter > 0) reasons.push("последний пик — контрпик без риска"); }
+    const total = comfort + m.v * weights.meta + counter * weights.counter + syn * weights.synergy + (posPen || 0) + cm;
     return { h, pos, total, inPool, comfort, meta: m.v, counter, syn, reasons, flags, posOk: posPen != null };
   }
 
-  function recommendations(pos) {
+  function recommendations(pos, n = 12) {
     const taken = takenIds();
     const p = playerFor(pos);
     let list = HEROES.filter(h => !taken.has(h.id));
@@ -387,7 +425,32 @@
       .map(h => scoreHero(h, pos))
       .filter(r => r.posOk || r.inPool)
       .sort((a, b) => b.total - a.total)
-      .slice(0, 12);
+      .slice(0, n);
+  }
+
+  // Best picks across all our open positions (for "our pick now").
+  function nowPicks() {
+    const best = new Map();
+    for (const p of [1, 2, 3, 4, 5].filter(q => !draft.ally[q]))
+      for (const r of recommendations(p, 25)) if (!best.has(r.h.id) || best.get(r.h.id).total < r.total) best.set(r.h.id, r);
+    return [...best.values()].sort((a, b) => b.total - a.total).slice(0, 12);
+  }
+
+  function bestPos(h) {
+    let best = null, bv = -Infinity;
+    for (const p of [1, 2, 3, 4, 5].filter(q => !draft.ally[q])) {
+      const r = scoreHero(h, p);
+      const v = r.total - (r.posOk || r.inPool ? 0 : 8);
+      if (v > bv) { bv = v; best = p; }
+    }
+    return best;
+  }
+
+  // Which roles the enemy still has to fill (greedy guess from their heroes' main positions).
+  function enemyOpenRoles() {
+    const open = new Set([1, 2, 3, 4, 5]);
+    for (const id of draft.enemy) { const h = byId.get(id); const p = h.pos.find(q => open.has(q)); if (p) open.delete(p); }
+    return open;
   }
 
   function banSuggestions() {
@@ -395,17 +458,20 @@
     const ours = Object.values(draft.ally).map(id => byId.get(id));
     const openPos = [1, 2, 3, 4, 5].filter(p => !draft.ally[p]);
     const poolHeroes = openPos.flatMap(p => playerFor(p).pool).map(id => byId.get(id)).filter(h => !taken.has(h.id));
+    const roles = enemyOpenRoles();
     return HEROES.filter(h => !taken.has(h.id)).map(h => {
       let v = metaScore(h).v;
       const vs = [];
+      if (draft.enemy.length && roles.has(h.pos[0])) v += 1; // fits a role the enemy still needs
       for (const o of ours) { const a = advantage(h, o); v += a.v * 0.8; if (a.v >= 1.5) vs.push(o.name); }
       for (const o of poolHeroes) if (o.counteredBy.has(h.id)) { v += 0.7; if (!vs.includes(o.name)) vs.push(o.name); }
       return { h, v, vs };
-    }).sort((a, b) => b.v - a.v).slice(0, 8);
+    }).sort((a, b) => b.v - a.v).slice(0, 12);
   }
 
   // ---------- rendering ----------
   function render() {
+    renderCM();
     renderAlly();
     renderEnemy();
     renderTabs();
@@ -423,10 +489,12 @@
       const h = hid ? byId.get(hid) : null;
       const inPool = h && t.pool.includes(h.id);
       const slot = el("button", {
-        class: "slot" + (activePos === t.pos ? " active" : ""),
+        class: "slot" + (view === t.pos ? " active" : ""),
         onclick: () => {
-          if (h) { activePos = t.pos; render(); return; }
-          openPicker({ title: `${t.player} · ${t.role}`, sub: "Выбери героя для нашей команды", pos: t.pos, onPick: id => setAlly(t.pos, id) });
+          if (h) { openPosSheet(t.pos); return; }
+          const s = stepInfo();
+          if (!s || s.type !== "pick" || s.side !== "us") { toast(s ? "Сейчас не наш пик" : "Драфт завершён"); return; }
+          openPicker({ title: `${t.player} · ${t.role}`, sub: "Наш пик на эту позицию", pos: t.pos, onPick: id => act(id, t.pos) });
         },
       },
         thumb(h),
@@ -437,7 +505,7 @@
             b.core.map(k => itemIcon(k, "item mini")),
             b.situational.map(s => itemIcon(s.key, "item mini sit-item", ITEMS[s.key][1] + " — " + s.reasons.join("; ")))); })() : null
         ),
-        h ? el("span", { class: "x", title: "Убрать", onclick: e => { e.stopPropagation(); delete draft.ally[t.pos]; saveDraft(); render(); } }, "✕") : null
+        h ? el("span", { class: "x", title: "Поменять позицию" }, "⇅") : null
       );
       box.append(slot);
     }
@@ -450,14 +518,13 @@
       const h = draft.enemy[i] ? byId.get(draft.enemy[i]) : null;
       box.append(el("button", {
         class: "slot",
-        onclick: () => h ? null : openPicker({ title: "Пик соперника", sub: "Кого взял соперник?", onPick: addEnemy }),
+        onclick: () => h ? null : openStepPicker(),
       },
         thumb(h),
         el("div", { class: "meta" },
           el("div", { class: "t1" }, h ? h.name : `Пик ${i + 1}`),
           el("div", { class: "t2" }, h ? h.pos.map(p => POS_NAMES[p]).slice(0, 2).join(" / ") : "ещё не выбран")
         ),
-        h ? el("span", { class: "x", title: "Убрать", onclick: e => { e.stopPropagation(); draft.enemy.splice(i, 1); saveDraft(); render(); } }, "✕") : null
       ));
     }
     renderBanRow($("#bans"), draft.enemyBans);
@@ -469,49 +536,40 @@
     if (!arr.length) box.append(el("div", { class: "empty-note" }, "Банов пока нет"));
     arr.forEach((id, i) => {
       const h = byId.get(id);
-      box.append(el("button", { class: "ban", title: h.name + " — нажми, чтобы убрать", onclick: () => { arr.splice(i, 1); saveDraft(); render(); } }, heroImg(h)));
+      box.append(el("div", { class: "ban", title: h.name }, heroImg(h)));
     });
   }
 
   function renderTabs() {
     const seg = $("#posTabs");
     seg.replaceChildren();
-    const open = [1, 2, 3, 4, 5].filter(p => !draft.ally[p]);
-    if (activePos == null || !team.some(t => t.pos === activePos)) activePos = open[0] || 1;
+    seg.append(el("button", { class: view === "now" ? "on" : "", onclick: () => { view = "now"; render(); } }, "Сейчас"));
     for (const t of [...team].sort((a, b) => a.pos - b.pos)) {
       seg.append(el("button", {
-        class: (activePos === t.pos ? "on" : "") + (draft.ally[t.pos] ? " done" : ""),
-        onclick: () => { activePos = t.pos; render(); },
+        class: (view === t.pos ? "on" : "") + (draft.ally[t.pos] ? " done" : ""),
+        onclick: () => { view = t.pos; render(); },
         title: `${t.player} — ${t.role}`,
       }, `${t.pos} · ${t.player}`));
     }
   }
 
-  function renderRecs() {
-    const box = $("#recList");
-    box.replaceChildren();
-    const pos = activePos;
-    const p = playerFor(pos);
-    if (draft.ally[pos]) {
-      const h = byId.get(draft.ally[pos]);
-      box.append(el("div", { class: "empty-note" }, `${p.player} уже на ${h.name}. Выбери другую позицию сверху.`));
-    }
-    const recs = recommendations(pos);
-    if (!recs.length) { box.append(el("div", { class: "empty-note" }, "Нет подходящих героев — выключи фильтр «только пул».")); return; }
-    const max = Math.max(...recs.map(r => r.total), 1);
-    const min = Math.min(...recs.map(r => r.total), 0);
-    recs.forEach((r, i) => {
+  // rows: [{h, total, flags, reasons, title?}]
+  function renderRows(box, rows, onPick) {
+    if (!rows.length) { box.append(el("div", { class: "empty-note" }, "Нет подходящих героев — выключи фильтр «только пул».")); return; }
+    const max = Math.max(...rows.map(r => r.total), 1);
+    const min = Math.min(...rows.map(r => r.total), 0);
+    rows.forEach((r, i) => {
       const h = r.h;
       const dbSlug = h.name.toLowerCase().replace(/'/g, "").replace(/[^a-z0-9]+/g, "-");
-      const row = el("div", {
-        class: "rec" + (i === 0 ? " top" : ""),
-        title: `Комфорт ${r.comfort.toFixed(1)} · мета ${r.meta.toFixed(1)} · контрпик ${r.counter.toFixed(1)} · синергия ${r.syn.toFixed(1)}`,
-        onclick: e => { if (e.target.closest("a")) return; if (!draft.ally[pos]) setAlly(pos, h.id); },
+      box.append(el("div", {
+        class: "rec" + (i === 0 ? " top" : "") + (onPick ? "" : " static"),
+        title: r.title || "",
+        onclick: e => { if (e.target.closest("a") || !onPick) return; onPick(r); },
       },
         thumb(h),
         el("div", {},
           el("div", { class: "name" }, h.name, ...r.flags.map(([c, t]) => el("span", { class: "tag " + c }, t))),
-          el("div", { class: "why", html: r.reasons.length ? r.reasons.join(" · ") : (r.inPool ? "комфортный герой игрока" : "универсальный вариант") }),
+          el("div", { class: "why", html: r.reasons.length ? r.reasons.join(" · ") : "универсальный вариант" }),
           el("div", { class: "links" },
             el("a", { href: `https://www.dotabuff.com/heroes/${dbSlug}/counters`, target: "_blank", rel: "noopener" }, "Dotabuff"),
             el("a", { href: `https://stratz.com/heroes/${h.id}/matchups`, target: "_blank", rel: "noopener" }, "STRATZ"))
@@ -519,9 +577,132 @@
         el("div", { class: "score" },
           el("div", { class: "num" }, r.total.toFixed(1)),
           el("div", { class: "bar" }, el("i", { style: `width:${Math.max(6, ((r.total - min) / (max - min || 1)) * 100)}%` })))
-      );
-      box.append(row);
+      ));
     });
+  }
+
+  const pickRow = r => {
+    const p = playerFor(r.pos);
+    return { ...r, flags: [["pos", `P${r.pos} ${p.player}`], ...r.flags],
+      title: `Комфорт ${r.comfort.toFixed(1)} · мета ${r.meta.toFixed(1)} · контрпик ${r.counter.toFixed(1)} · синергия ${r.syn.toFixed(1)}` };
+  };
+  const banRow = (b, label) => ({ h: b.h, total: b.v, flags: label ? [["risk", label]] : [],
+    reasons: [b.vs.length ? "опасен для: <b>" + b.vs.slice(0, 3).map(esc).join(", ") + "</b>" : "", (() => { const s = stats?.get(b.h.id); return s ? `WR <b>${(s.wr * 100).toFixed(1)}%</b> в Divine+` : ""; })()].filter(Boolean) });
+
+  function renderRecs() {
+    const box = $("#recList");
+    box.replaceChildren();
+    const s = stepInfo();
+    const head = $("#recTitle");
+    if (view !== "now") {
+      const pos = view, p = playerFor(pos);
+      head.textContent = `Позиция ${pos} · ${p.player}`;
+      if (draft.ally[pos]) box.append(el("div", { class: "empty-note" }, `${p.player} уже на ${byId.get(draft.ally[pos]).name}.`));
+      const canPick = s && s.type === "pick" && s.side === "us" && !draft.ally[pos];
+      renderRows(box, recommendations(pos).map(pickRow), canPick ? r => act(r.h.id, pos) : null);
+      return;
+    }
+    if (!s) { head.textContent = "Драфт завершён"; box.append(el("div", { class: "empty-note" }, "Все пики и баны сделаны. Смотри предметы под драфт ниже.")); return; }
+    if (s.side === "us" && s.type === "pick") {
+      head.textContent = "Наш пик — лучшие варианты";
+      renderRows(box, nowPicks().map(pickRow), r => act(r.h.id, r.pos));
+    } else if (s.side === "us") {
+      head.textContent = "Наш бан — кого убрать";
+      renderRows(box, banSuggestions().map(b => banRow(b)), r => act(r.h.id));
+    } else if (s.type === "pick") {
+      head.textContent = "Ход соперника — чего ждать";
+      box.append(el("div", { class: "empty-note" }, "Самые опасные для нас варианты. Нажми на героя, если соперник его взял."));
+      renderRows(box, banSuggestions().map(b => banRow(b, "угроза")), r => act(r.h.id));
+    } else {
+      head.textContent = "Бан соперника — что могут забрать";
+      const taken = takenIds();
+      const ours = [1, 2, 3, 4, 5].filter(q => !draft.ally[q]).flatMap(q => playerFor(q).pool.map(id => ({ id, q })))
+        .filter(x => !taken.has(x.id));
+      const rows = ours.map(({ id, q }) => { const h = byId.get(id); const m = metaScore(h); return { h, total: m.v + 3, flags: [["pool", `пул ${playerFor(q).player}`]], reasons: [m.wr != null ? `WR <b>${(m.wr * 100).toFixed(1)}%</b> в Divine+` : ""].filter(Boolean) }; })
+        .sort((a, b) => b.total - a.total).filter((r, i, a) => a.findIndex(x => x.h.id === r.h.id) === i).slice(0, 10);
+      box.append(el("div", { class: "empty-note" }, "Наши комфортные герои, которых скорее всего забанят. Нажми на героя, если его забанили."));
+      renderRows(box, rows, r => act(r.h.id));
+    }
+  }
+
+  // ---------- Captains Mode bar ----------
+  const TURN = 30, RESERVE = 130;
+  const timer = { running: false, turn: TURN, reserve: { us: RESERVE, them: RESERVE } };
+  const fmt = t => `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
+  setInterval(() => {
+    const s = stepInfo();
+    if (!timer.running || !s) return;
+    if (timer.turn > 0) timer.turn--; else if (timer.reserve[s.side] > 0) timer.reserve[s.side]--;
+    renderTimer();
+  }, 1000);
+  function renderTimer() {
+    const s = stepInfo();
+    $("#cmTurn").textContent = s ? (timer.turn > 0 ? fmt(timer.turn) : "резерв") : "—";
+    $("#cmTurn").classList.toggle("low", !!s && timer.turn <= 10);
+    $("#cmResUs").textContent = fmt(timer.reserve.us);
+    $("#cmResThem").textContent = fmt(timer.reserve.them);
+    $("#btnTimer").textContent = timer.running ? "⏸ Пауза" : "▶ Таймер";
+  }
+
+  function stepLabel(s) {
+    const who = s.side === "us" ? "Наш" : "Соперник";
+    const what = s.type === "ban" ? (s.side === "us" ? "бан" : "банит") : (s.side === "us" ? "пик" : "пикает");
+    return `${who} ${what}`;
+  }
+
+  function renderCM() {
+    const s = stepInfo();
+    $("#cmFirst").querySelectorAll("button").forEach(b => b.classList.toggle("on", (b.dataset.first === "1") === draft.firstPick));
+    const now = $("#cmNow");
+    now.className = "cm-now " + (s ? s.side + " " + s.type : "done");
+    now.replaceChildren(s
+      ? el("div", {}, el("div", { class: "cm-step" }, `Ход ${s.i + 1} из ${CM.length} · фаза ${s.phase}`), el("div", { class: "cm-what" }, stepLabel(s)))
+      : el("div", {}, el("div", { class: "cm-step" }, "Готово"), el("div", { class: "cm-what" }, "Драфт завершён")));
+    $("#btnStep").disabled = !s;
+    $("#btnUndo").disabled = !draft.actions.length;
+    const tl = $("#cmTimeline");
+    tl.replaceChildren();
+    PHASE_START.forEach((start, ph) => {
+      const end = PHASE_START[ph + 1] ?? CM.length;
+      const group = el("div", { class: "cm-phase" }, el("div", { class: "cm-phase-title" }, `Фаза ${ph + 1}`));
+      const row = el("div", { class: "cm-row" });
+      for (let i = start; i < end; i++) {
+        const st = stepInfo(i), a = draft.actions[i];
+        const h = a ? byId.get(a.hero) : null;
+        row.append(el("div", {
+          class: `cm-chip ${st.side} ${st.type}` + (i === draft.actions.length ? " current" : "") + (a ? " filled" : ""),
+          title: `${i + 1}. ${stepLabel(st)}${h ? ": " + h.name : ""}`,
+        }, h ? heroImg(h) : el("span", {}, st.type === "ban" ? "B" : "P")));
+      }
+      group.append(row);
+      tl.append(group);
+    });
+    renderTimer();
+  }
+
+  function openStepPicker(query) {
+    const s = stepInfo();
+    if (!s) { toast("Драфт завершён"); return; }
+    const sub = s.side === "us" && s.type === "pick" ? "Позицию подберу сам — потом можно поменять" : "Enter — подтвердить";
+    openPicker({ title: `Ход ${s.i + 1}: ${stepLabel(s)}`, sub, onPick: id => act(id), query, pos: null });
+  }
+
+  function openPosSheet(pos) {
+    const body = $("#posBody");
+    body.replaceChildren();
+    const h = byId.get(draft.ally[pos]);
+    $("#posTitle").textContent = `${h.name}: на какую позицию?`;
+    for (const t of [...team].sort((a, b) => a.pos - b.pos)) {
+      const other = draft.ally[t.pos] ? byId.get(draft.ally[t.pos]).name : "свободно";
+      body.append(el("button", { class: "pill pos-choice" + (t.pos === pos ? " on" : ""), onclick: () => {
+        const a = draft.actions.find(x => x.hero === h.id);
+        const b = draft.actions.find(x => x.pos === t.pos && x.hero !== h.id && draft.ally[t.pos] === x.hero);
+        if (b) b.pos = pos;
+        a.pos = t.pos;
+        rebuild(); saveDraft(); $("#posSheet").hidden = true; render();
+      } }, `P${t.pos} · ${t.player} (${other})`));
+    }
+    $("#posSheet").hidden = false;
   }
 
   function renderBans() {
@@ -531,12 +712,12 @@
       const s = stats?.get(b.h.id);
       box.append(el("button", {
         class: "ban-sugg", title: "Нажми, чтобы забанить",
-        onclick: () => addBan(b.h.id, "ourBans"),
+        onclick: () => { const st = stepInfo(); if (st && st.type === "ban" && st.side === "us") act(b.h.id); else toast("Сейчас не наш бан"); },
       },
         thumb(b.h),
         el("div", {},
           el("div", { class: "t1" }, b.h.name),
-          el("div", { class: "t2" }, b.vs.length ? "опасен для: " + b.vs.slice(0, 3).join(", ") : s ? `WR ${(s.wr * 100).toFixed(1)}%, пики/баны в про` : "сильный в мете"))
+          el("div", { class: "t2" }, b.vs.length ? "опасен для: " + b.vs.slice(0, 3).join(", ") : s ? `WR ${(s.wr * 100).toFixed(1)}% в Divine+` : "сильный в мете"))
       ));
     }
   }
@@ -558,22 +739,25 @@
   }
 
   // ---------- mutations ----------
-  function setAlly(pos, id) {
-    draft.ally[pos] = id;
-    // move to next open position automatically
-    const open = [1, 2, 3, 4, 5].filter(p => !draft.ally[p]);
-    activePos = open[0] || pos;
-    saveDraft(); render(); ensureMatchups();
-    toast(`${playerFor(pos).player}: ${byId.get(id).name}`);
-  }
-  function addEnemy(id) {
-    if (draft.enemy.length >= 5) { toast("У соперника уже 5 героев"); return; }
-    draft.enemy.push(id); saveDraft(); render(); ensureMatchups();
-  }
-  function addBan(id, side = "ourBans") {
+  function act(id, pos) {
+    const s = stepInfo();
+    if (!s) { toast("Драфт завершён"); return; }
     if (takenIds().has(id)) return;
-    draft[side].push(id); saveDraft(); render();
-    toast(byId.get(id).name + (side === "ourBans" ? " — наш бан" : " — бан соперника"));
+    const h = byId.get(id);
+    const a = { hero: id };
+    if (s.type === "pick" && s.side === "us") a.pos = pos && !draft.ally[pos] ? pos : bestPos(h);
+    draft.actions.push(a);
+    rebuild(); saveDraft();
+    timer.turn = TURN;
+    view = "now";
+    render(); ensureMatchups();
+    toast(a.pos ? `${playerFor(a.pos).player} (P${a.pos}): ${h.name}` : `${stepLabel(s)}: ${h.name}`);
+  }
+  function undo() {
+    if (!draft.actions.length) return;
+    const a = draft.actions.pop();
+    rebuild(); saveDraft(); timer.turn = TURN; render();
+    toast("Отменено: " + byId.get(a.hero).name);
   }
 
   // ---------- picker ----------
@@ -681,10 +865,18 @@
 
   // ---------- events ----------
   function bind() {
-    $("#btnAddEnemy").onclick = () => openPicker({ title: "Пик соперника", sub: "Кого взял соперник?", onPick: addEnemy });
-    $("#btnAddBan").onclick = () => openPicker({ title: "Бан соперника", sub: "Кого забанил соперник?", onPick: id => addBan(id, "enemyBans") });
-    $("#btnOurBan").onclick = () => openPicker({ title: "Наш бан", sub: "Кого баним мы?", onPick: id => addBan(id, "ourBans") });
-    $("#btnReset").onclick = () => { if (confirm("Очистить драфт?")) { draft = emptyDraft(); activePos = 1; saveDraft(); render(); } };
+    $("#btnStep").onclick = () => openStepPicker();
+    $("#btnUndo").onclick = undo;
+    $("#btnTimer").onclick = () => { timer.running = !timer.running; renderTimer(); };
+    $("#cmFirst").addEventListener("click", e => {
+      const b = e.target.closest("button"); if (!b) return;
+      const first = b.dataset.first === "1";
+      if (first === draft.firstPick) return;
+      if (draft.actions.length && !confirm("Сменить порядок пика? Текущий драфт сбросится.")) return;
+      draft = emptyDraft(first); saveDraft(); render();
+    });
+    const resetAll = () => { draft = emptyDraft(draft.firstPick); view = "now"; Object.assign(timer, { running: false, turn: TURN, reserve: { us: RESERVE, them: RESERVE } }); saveDraft(); render(); };
+    $("#btnReset").onclick = () => { if (confirm("Начать новый драфт?")) resetAll(); };
     $("#btnTeam").onclick = () => { renderTeamSheet(); $("#teamSheet").hidden = false; };
     $("#btnTeamDefault").onclick = () => { if (confirm("Вернуть составы и пулы по умолчанию?")) { team = defaultTeam(); saveTeam(); renderTeamSheet(); render(); } };
     $("#btnRefreshData").onclick = async () => {
@@ -718,12 +910,15 @@
       else if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); kbIndex = Math.max(0, kbIndex - 1); renderPicker(); }
     });
     document.addEventListener("keydown", e => {
+      const typingNow = /INPUT|TEXTAREA/.test(document.activeElement?.tagName);
+      const sheetOpen = [...document.querySelectorAll(".sheet-wrap")].some(w => !w.hidden);
+      if (!typingNow && !sheetOpen && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); return; }
       if (e.key === "Escape") { document.querySelectorAll(".sheet-wrap").forEach(w => (w.hidden = true)); closePicker(); return; }
       const typing = /INPUT|TEXTAREA/.test(document.activeElement?.tagName);
       const anyOpen = [...document.querySelectorAll(".sheet-wrap")].some(w => !w.hidden);
       if (!typing && !anyOpen && e.key.length === 1 && /\S/.test(e.key) && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
-        openPicker({ title: "Пик соперника", sub: "Быстрый ввод: Enter — добавить сопернику", onPick: addEnemy, query: e.key });
+        openStepPicker(e.key);
       }
     });
   }
