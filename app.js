@@ -16,6 +16,8 @@
     stats: "msu.stats.v1",
     mu: "msu.mu.v1.",
     items: "msu.items.v1.",
+    enemyPlayers: "msu.enemyPlayers.v1",
+    player: "msu.player.v1.",
   };
   const DAY = 24 * 3600 * 1000;
   const POS_NAMES = { 1: "Керри", 2: "Мид", 3: "Оффлейн", 4: "Четвёрка", 5: "Пятёрка" };
@@ -309,6 +311,124 @@
     }
   }
 
+  // ---------- enemy players (scouting via OpenDota, same IDs as Dotabuff) ----------
+  const RANKS = ["", "Рекрут", "Страж", "Рыцарь", "Герой", "Легенда", "Властелин", "Божество", "Титан"];
+  let enemyInputs = store.get(LS.enemyPlayers, ["", "", "", "", ""]);
+  const playerData = new Map(); // accountId -> data
+
+  // Accepts a Friend ID, a Steam64 ID or a Dotabuff / OpenDota / STRATZ / Steam profile link.
+  function parseAccount(str) {
+    const t = String(str || "").trim();
+    if (!t) return null;
+    const m = t.match(/players\/(\d+)/) || t.match(/profiles\/(\d+)/) || t.match(/(\d{3,20})/);
+    if (!m) return null;
+    const big = BigInt(m[1]);
+    const base = 76561197960265728n;
+    return String(big >= base ? big - base : big);
+  }
+
+  function roleGuess(heroes) {
+    const roles = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    let total = 0;
+    for (const x of heroes) {
+      const h = byId.get(x.id);
+      if (!h) continue;
+      roles[h.pos[0]] += x.g * 0.7;
+      roles[h.pos[1] || h.pos[0]] += x.g * 0.3;
+      total += x.g;
+    }
+    const best = Object.entries(roles).sort((a, b) => b[1] - a[1])[0];
+    return total ? { pos: Number(best[0]), share: best[1] / total } : null;
+  }
+
+  async function loadPlayer(acc, force) {
+    const key = LS.player + acc;
+    const cached = store.get(key, null);
+    if (!force && cached && Date.now() - cached.t < DAY / 2) { playerData.set(acc, cached.d); return; }
+    playerData.set(acc, { status: "loading" });
+    renderEnemyPlayers();
+    try {
+      const [prof, recent] = await Promise.all([
+        fetchJSON(`${API}/players/${acc}`),
+        fetchJSON(`${API}/players/${acc}/heroes?date=180`),
+      ]);
+      let list = recent;
+      if (list.reduce((n, x) => n + (x.games || 0), 0) < 20) list = await fetchJSON(`${API}/players/${acc}/heroes`);
+      const heroes = list.filter(x => x.games > 0).map(x => ({ id: Number(x.hero_id), g: x.games, w: x.win }))
+        .sort((a, b) => b.g - a.g).slice(0, 15);
+      const d = {
+        status: !prof?.profile ? "missing" : heroes.length ? "ok" : "private",
+        name: prof?.profile?.personaname || "Игрок " + acc,
+        avatar: prof?.profile?.avatarmedium || "",
+        rank: prof?.rank_tier ? `${RANKS[Math.floor(prof.rank_tier / 10)] || ""} ${prof.rank_tier % 10 || ""}`.trim() : "",
+        heroes, role: roleGuess(heroes),
+      };
+      playerData.set(acc, d);
+      if (d.status !== "missing") store.set(key, { t: Date.now(), d });
+    } catch (e) {
+      playerData.set(acc, cached ? cached.d : { status: "error" });
+    }
+    render();
+  }
+
+  // heroId -> [{player, g, w, bonus}] for heroes the enemy players are comfortable on
+  function enemyComfort() {
+    const map = new Map();
+    for (const acc of new Set(enemyInputs.map(parseAccount).filter(Boolean))) { // same player twice counts once
+      const d = playerData.get(acc);
+      if (!d || d.status !== "ok") continue;
+      for (const x of d.heroes) {
+        if (x.g < 3) continue;
+        const wr = x.w / x.g;
+        const bonus = Math.min(x.g, 40) / 40 * 4 + (x.g >= 5 ? (wr - 0.5) * 10 : 0);
+        if (bonus <= 0.3) continue;
+        if (!map.has(x.id)) map.set(x.id, []);
+        map.get(x.id).push({ player: d.name, g: x.g, w: x.w, bonus });
+      }
+    }
+    return map;
+  }
+
+  function renderEnemyPlayers() {
+    const box = $("#enemyPlayers");
+    if (!box) return;
+    box.replaceChildren();
+    enemyInputs.forEach((raw, i) => {
+      const acc = parseAccount(raw);
+      const d = acc ? playerData.get(acc) : null;
+      const input = el("input", { class: "pl-input", value: raw, placeholder: `Игрок ${i + 1}: ID или ссылка Dotabuff`, inputmode: "text", autocomplete: "off" });
+      const commit = () => {
+        if (input.value === enemyInputs[i]) return;
+        enemyInputs[i] = input.value.trim();
+        store.set(LS.enemyPlayers, enemyInputs);
+        const a = parseAccount(enemyInputs[i]);
+        if (a) loadPlayer(a); else render();
+      };
+      input.addEventListener("change", commit);
+      input.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); input.blur(); } });
+      let info;
+      if (!raw) info = null;
+      else if (!acc) info = el("div", { class: "pl-status bad" }, "не похоже на ID");
+      else if (!d || d.status === "loading") info = el("div", { class: "pl-status" }, "загружаю…");
+      else if (d.status === "error") info = el("div", { class: "pl-status bad" }, "OpenDota не ответила, попробуй позже");
+      else if (d.status === "missing") info = el("div", { class: "pl-status bad" }, "игрок не найден");
+      else if (d.status === "private") info = el("div", { class: "pl-status bad" }, `${d.name}: история матчей закрыта`);
+      else info = el("div", { class: "pl-info" },
+        el("div", { class: "pl-name" },
+          d.avatar ? el("img", { class: "pl-ava", src: d.avatar, alt: "" }) : null,
+          el("b", {}, d.name),
+          d.rank ? el("span", { class: "muted small" }, " · " + d.rank) : null,
+          d.role ? el("span", { class: "tag pos" }, `P${d.role.pos} ${Math.round(d.role.share * 100)}%`) : null),
+        el("div", { class: "pl-heroes" }, d.heroes.slice(0, 6).map(x => {
+          const h = byId.get(x.id);
+          if (!h) return null;
+          return el("span", { class: "pl-hero", title: `${h.name}: ${x.g} игр, ${Math.round(x.w / x.g * 100)}% побед` },
+            thumb(h), el("span", {}, `${x.g} · ${Math.round(x.w / x.g * 100)}%`));
+        })));
+      box.append(el("div", { class: "pl-row" }, input, info));
+    });
+  }
+
   // ---------- scoring ----------
   function metaScore(h) {
     const s = stats?.get(h.id);
@@ -461,13 +581,16 @@
     const openPos = [1, 2, 3, 4, 5].filter(p => !draft.ally[p]);
     const poolHeroes = openPos.flatMap(p => playerFor(p).pool).map(id => byId.get(id)).filter(h => !taken.has(h.id));
     const roles = enemyOpenRoles();
+    const comfort = enemyComfort();
     return HEROES.filter(h => !taken.has(h.id)).map(h => {
       let v = metaScore(h).v;
       const vs = [];
+      const pl = comfort.get(h.id) || [];
+      for (const c of pl) v += c.bonus;
       if (draft.enemy.length && roles.has(h.pos[0])) v += 1; // fits a role the enemy still needs
       for (const o of ours) { const a = advantage(h, o); v += a.v * 0.8; if (a.v >= 1.5) vs.push(o.name); }
       for (const o of poolHeroes) if (o.counteredBy.has(h.id)) { v += 0.7; if (!vs.includes(o.name)) vs.push(o.name); }
-      return { h, v, vs };
+      return { h, v, vs, pl };
     }).sort((a, b) => b.v - a.v).slice(0, 12);
   }
 
@@ -525,12 +648,13 @@
         thumb(h),
         el("div", { class: "meta" },
           el("div", { class: "t1" }, h ? h.name : `Пик ${i + 1}`),
-          el("div", { class: "t2" }, h ? h.pos.map(p => POS_NAMES[p]).slice(0, 2).join(" / ") : "ещё не выбран")
+          el("div", { class: "t2" }, h ? (() => { const c = enemyComfort().get(h.id); return c ? `скорее всего ${c.sort((a, b) => b.g - a.g)[0].player}` : h.pos.map(p => POS_NAMES[p]).slice(0, 2).join(" / "); })() : "ещё не выбран")
         ),
       ));
     }
     renderBanRow($("#bans"), draft.enemyBans);
     renderBanRow($("#ourBans"), draft.ourBans);
+    if (!document.activeElement?.classList.contains("pl-input")) renderEnemyPlayers();
   }
 
   function renderBanRow(box, arr) {
@@ -588,8 +712,9 @@
     return { ...r, flags: [["pos", `P${r.pos} ${p.player}`], ...r.flags],
       title: `Комфорт ${r.comfort.toFixed(1)} · мета ${r.meta.toFixed(1)} · контрпик ${r.counter.toFixed(1)} · синергия ${r.syn.toFixed(1)}` };
   };
-  const banRow = (b, label) => ({ h: b.h, total: b.v, flags: label ? [["risk", label]] : [],
-    reasons: [b.vs.length ? "опасен для: <b>" + b.vs.slice(0, 3).map(esc).join(", ") + "</b>" : "", (() => { const s = stats?.get(b.h.id); return s ? `WR <b>${(s.wr * 100).toFixed(1)}%</b> в Divine+` : ""; })()].filter(Boolean) });
+  const banRow = (b, label) => ({ h: b.h, total: b.v,
+    flags: [...(label ? [["risk", label]] : []), ...(b.pl?.length ? [["enemy", "пул соперника"]] : [])],
+    reasons: [b.pl?.length ? b.pl.map(c => `<b>${esc(c.player)}</b>: ${c.g} игр, ${Math.round(c.w / c.g * 100)}%`).join(", ") : "", b.vs.length ? "опасен для: <b>" + b.vs.slice(0, 3).map(esc).join(", ") + "</b>" : "", (() => { const s = stats?.get(b.h.id); return s ? `WR <b>${(s.wr * 100).toFixed(1)}%</b> в Divine+` : ""; })()].filter(Boolean) });
 
   function renderRecs() {
     const box = $("#recList");
@@ -719,7 +844,7 @@
         thumb(b.h),
         el("div", {},
           el("div", { class: "t1" }, b.h.name),
-          el("div", { class: "t2" }, b.vs.length ? "опасен для: " + b.vs.slice(0, 3).join(", ") : s ? `WR ${(s.wr * 100).toFixed(1)}% в Divine+` : "сильный в мете"))
+          el("div", { class: "t2" }, b.pl.length ? b.pl.map(c => `${c.player}: ${c.g} игр`).join(", ") : b.vs.length ? "опасен для: " + b.vs.slice(0, 3).join(", ") : s ? `WR ${(s.wr * 100).toFixed(1)}% в Divine+` : "сильный в мете"))
       ));
     }
   }
@@ -869,6 +994,8 @@
   function bind() {
     $("#btnStep").onclick = () => openStepPicker();
     $("#btnUndo").onclick = undo;
+    $("#btnPlayersClear").onclick = () => { if (confirm("Очистить игроков соперника?")) { enemyInputs = ["", "", "", "", ""]; store.set(LS.enemyPlayers, enemyInputs); render(); } };
+    $("#btnPlayersReload").onclick = () => { enemyInputs.map(parseAccount).filter(Boolean).forEach(a => loadPlayer(a, true)); };
     $("#btnTimer").onclick = () => { timer.running = !timer.running; renderTimer(); };
     $("#cmFirst").addEventListener("click", e => {
       const b = e.target.closest("button"); if (!b) return;
@@ -931,4 +1058,5 @@
   render();
   preloadImages();
   loadStats(false).then(ensureMatchups);
+  enemyInputs.map(parseAccount).filter(Boolean).forEach(a => loadPlayer(a));
 })();

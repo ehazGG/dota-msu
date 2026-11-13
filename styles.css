@@ -310,3 +310,19 @@ h3 { font-size: 15px; margin: 0; }
 .pos-choice { justify-content: flex-start; }
 .pos-choice.on { border-color: var(--accent); }
 @media (max-width: 760px) { .cm-top .seg { margin-left: 0; } .cm-chip { width: 38px; height: 24px; } }
+
+/* ===== Enemy players ===== */
+.row-btns { display: flex; gap: 6px; }
+.pl-hint { margin: -4px 0 10px; }
+.pl-list { display: grid; gap: 8px; }
+.pl-row { display: grid; gap: 6px; padding: 8px; border-radius: 16px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); }
+.pl-input { width: 100%; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--stroke); background: rgba(0,0,0,.25); color: var(--text); font-size: 14px; outline: none; }
+.pl-input:focus { border-color: var(--accent); }
+.pl-status { font-size: 12.5px; color: var(--muted); }
+.pl-status.bad { color: #ffb3b3; }
+.pl-name { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13.5px; }
+.pl-ava { width: 22px; height: 22px; border-radius: 50%; }
+.pl-heroes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.pl-hero { display: grid; gap: 2px; font-size: 10.5px; color: var(--muted); text-align: center; }
+.pl-hero .thumb { width: 50px; height: 28px; border-radius: 7px; overflow: hidden; }
+.tag.enemy { background: rgba(255,107,107,.2); color: #ffc2c2; }
